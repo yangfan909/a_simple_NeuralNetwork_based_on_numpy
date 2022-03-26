@@ -1,0 +1,15 @@
+from Layer import Tensor, Convolution2D
+import numpy as np
+Input = Tensor(3,4,4)
+input = np.random.rand(3,4,4)
+print(input)
+cv2Dout = Convolution2D(fliters=3,kernel=(3,3),activation='relu')(Input)
+print(cv2Dout.get_layer())
+shapeA = cv2Dout.get_layer()
+shapeA = list(shapeA)
+print(shapeA)
+fed = np.ones(shapeA)
+print(fed)
+layer = cv2Dout.getHiddenLayer()
+cv2Dres = layer[0].forward(input)
+print("cv2Dres:\n",cv2Dres)
