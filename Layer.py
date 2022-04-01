@@ -4,9 +4,10 @@ import numpy as np
 import Activator as Actor
 from math import ceil
 from abc import abstractmethod
-
+epsilon = 1e-8
 class Layer(object):
     def __init__(self):
+        self.name = 'Layer'
         pass
     @abstractmethod
     def get_layer(self):
@@ -17,6 +18,10 @@ class Layer(object):
     @abstractmethod
     def feedBackward(self,output):
         pass
+    @abstractmethod
+    def loadWeights(self):
+        pass
+    @abstractmethod
     def __call__(self,data):
         pass
 class Regularization(object):
@@ -26,9 +31,26 @@ class Regularization(object):
     @abstractmethod
     def __call__(self,data):
         pass
-
+class GradientClipping(object):
+    def __init__(self,epsilon=1e-8,clipval=10):
+        def clipByValue(x):
+            if x< -clipval:
+                x = -clipval
+            elif x>clipval:
+                x = clipval
+            elif np.isnan(x):
+                x = epsilon
+            elif np.isinf(x):
+                x = np.random.rand()
+            
+            return x
+        self.clipval = np.frompyfunc(clipByValue,1,1)
+    def __call__(self, x):
+        y = self.clipval(x)
+        y = np.array(y)
+        return y
 class L2Regularization(Regularization):
-    def __init__(self,lamd:float):
+    def __init__(self,lamd:float = 0.0001):
         self.lamd = lamd
     def __call__(self,data:np.array,num:int):
         def L2Regular(x):
@@ -47,45 +69,47 @@ class Tensor(object):
     def addLayer(self,layer:Layer,temp= None):
         if temp != None:
             a = temp.getHiddenLayer()
-            for i in a:
-                self.layer.append(i)
+            if(len(a)>0):
+                for i in a:
+                    self.layer.append(i)
+        
         self.layer.append(layer)
     def getHiddenLayer(self)-> list[Layer]:
         return self.layer
     def get_layer(self):
         return self.shape
 class Dense(Layer):#epsilon
-
-    def __init__(self,inputShape:tuple= None, neurons:int= None, activation :str=None,learningRate :float=0.001,biasUsed :bool=False ,clipsize:float = 1,clipval:float = 1):
+    order = 0
+    def __init__(self,inputShape:tuple= None, neurons:int= None, activation :str=None,learningRate :float=0.001,decay :float=1,biasUsed :bool=False ,clipval:float = 1,name:str=None):
+        if name is None:
+            self.name = "Dense"+str(Dense.order)
+        else:
+            self.name = name
+        Dense.order += 1
+        self.decay = decay
+        self.now = self.decay
         self.learningRate = learningRate
         self.neurons = neurons
         self.activation = activation
         self.biasUsed = biasUsed
         self.bias = np.random.rand( self.neurons,1 )
         self.activation = Actor.interceptor(activation)
-        self.clipval = clipval
-        self.clipsize =clipsize
-        def clipByValue(x):
-            if x< -clipval:
-                x = -clipval
-            elif x>clipval:
-                x = clipval
-            return x
-        self.clipval = np.frompyfunc(clipByValue,1,1)
-        if(inputShape != None):
-            self.lastDim = inputShape[0]
-            self.weights = np.random.rand(neurons,inputShape[0])
-            self.backPropagationW = np.zeros( (neurons,inputShape[0]) )
-            self.backPropagationB = np.zeros( (neurons,1) )
-            self.backPropagation = np.zeros(inputShape[0])
+        self.clipval = GradientClipping(clipval = clipval)
+        self.inputShape = inputShape
+        self.inputOK()
+    def inputOK(self):
+        if(self.inputShape != None):
+            self.lastDim = self.inputShape[0]
+            self.weights = np.random.rand(self.neurons,self.inputShape[0])
+            self.weights = self.weights/self.lastDim
+            self.bias = np.random.rand(self.neurons)/self.lastDim
+            self.backPropagationW = np.zeros( (self.neurons,self.inputShape[0]) )
+            self.backPropagationB = np.zeros( (self.neurons,1) )
+            self.backPropagation = np.zeros(self.inputShape[0])
     def __call__(self, input:Tensor = None):
 
-        self.lastDim = input.get_layer()[0]
         self.inputShape = input.get_layer()
-
-        self.weights = np.random.rand(self.neurons ,self.lastDim)
-        self.backPropagationW = np.zeros( (self.neurons,self.inputShape[0]) )
-        self.backPropagationB = np.zeros( (self.neurons,1) )
+        self.inputOK()
         self.output = Tensor( self.neurons)
         self.output.addLayer(self,input)
         return self.output
@@ -93,11 +117,11 @@ class Dense(Layer):#epsilon
     def forward(self,input):
         self.input =np.array(input)
         # NOTICE: This is a temporary test
-        print("self.input",self.input.shape)
-        print("self.weights",self.weights.shape)
+        # print("self.input",self.input.shape)
+        # print("self.weights",self.weights.shape)
         self.result =np.matmul(self.weights,self.input);
 
-        # print(self.result,"\n",self.result.shape)
+        # # print(self.result,"\n",self.result.shape)
         if self.biasUsed:
             self.result += self.bias
         self.result = self.activation(self.result)
@@ -115,17 +139,19 @@ class Dense(Layer):#epsilon
     def feedBackward(self,feedback:np.array):
         self.loss_div_weights = np.zeros( (self.neurons,self.lastDim) )
         self.loss_div_bias = np.zeros( (self.neurons))
-        self.loss_div_bias =np.matmul(feedback,self.activation.derivation(self.result))
-        print('self.loss_div_bias\n',self.loss_div_bias)
+        temp = self.activation.derivation(self.result,all = True)
+        self.loss_div_bias =np.matmul(feedback,temp)
+        # print('self.loss_div_bias\n',self.loss_div_bias)
 
-        print(self.input)
+        # print(self.input)
         # for i in range(self.neurons):
         #     for j in range(self.lastDim):
         #         self.loss_div_weights[i,j] += self.loss_div_bias[0,i]*\
         #         self.input[j]
         #         pass  
-        self.input = np.array(self.input).reshape(1,self.lastDim)
-        self.loss_div_weights =np.array(np.matmul(self.loss_div_bias.T,self.input))
+        self.input = np.array(self.input).reshape(self.lastDim,1)
+        # print("insert128:",self.loss_div_bias.shape,self.input.shape)
+        self.loss_div_weights =np.array(np.matmul(self.loss_div_bias.T,self.input.T))
         self.clipval(self.loss_div_weights)
         self.clipval(self.loss_div_bias)
 
@@ -133,57 +159,75 @@ class Dense(Layer):#epsilon
         if self.biasUsed:
             self.backPropagationB = self.backPropagationB + self.loss_div_bias
         self.backPropagation =np.matmul(feedback,self.weights)
-        # print('self.loss_div_bias\n',self.loss_div_bias)
-        print('self.loss_div_weights\n',self.loss_div_weights)
 
         return self.backPropagation
 
     def parameterUpdate(self,sum:int,regularization:Regularization = None):
-        self.weights -= self.learningRate/sum*self.backPropagationW
-        self.bias -= self.learningRate/sum*self.backPropagationB
+        self.now = self.now *self.decay
+        self.weights = self.weights - self.now*self.learningRate/sum*self.backPropagationW
+        self.bias = self.bias - self.learningRate/sum*self.backPropagationB
         if regularization!= None:
             self.weights = regularization(data = self.weights,num = sum)
             self.bias = regularization(data = self.bias,num = sum)
-        self.backPropagationW -= self.backPropagationW
-        self.backPropagationB -= self.backPropagationB
+        self.backPropagationW = np.zeros( (self.neurons,self.inputShape[0]) )
+        self.backPropagationB = np.zeros( (self.neurons,1) )
+        self.backPropagation = np.zeros(self.inputShape[0])
         pass
+    def logWeights(self):
+        return {""}
+    def loadWeights(self, filename = None,weights=None,bias=None):
+        if filename is None:
+            if weights is not None:
+                weights = np.array(weights)
+                assert self.weights.shape == weights.shape
+                self.weights = weights
+            if bias is not None:
+                bias = np.array(bias)
+                assert self.bias.shape == bias.shape
+                self.bias = bias
+        pass
+    def __repr__(self):
+        return self.name
 class Convolution2D(Layer):
-
-    def __init__(self,inputShape:tuple = None, filters:int= None,kernel:tuple=None, activation :str=None,learningRate :float=0.001,biasUsed :bool=False ,clipsize:float = 0.001,clipval:float = 0):
+    order = 0
+    def __init__(self,inputShape:tuple = None, filters:int= None,kernel:tuple=None, activation :str=None,learningRate :float=0.001,decay:float=1.0,biasUsed :bool=False ,clipval:float = 1,name:str=None):
+        if name is None:
+            self.name = "Convolution2D"+Convolution2D.order
+        else:
+            self.name = name
+        Convolution2D.order += 1
+        self.decay = decay
+        self.now = self.decay
         self.learningRate = learningRate
         self.filters = filters
         self.kernel = kernel
         self.activation = activation
         self.biasUsed = biasUsed
         self.activation = Actor.interceptor(activation)
-        self.clipval = clipval
-        self.clipsize =clipsize
         self.inputShape = inputShape
-        def clipByValue(x):
-            if x< -clipval:
-                x = -clipval
-            elif x>clipval:
-                x = clipval
-        self.clipval = np.frompyfunc(clipByValue,1,1)
+        self.clipval = GradientClipping(clipval = clipval)
         self.inputOK()
     def inputOK(self):
         if self.inputShape!=None:
             if len(self.inputShape)==2:
                 self.inputShape =(1,self.inputShape[0],self.inputShape[1])
+            temp = self.kernel[0]*self.kernel[1]*self.inputShape[0]
             inputShape = self.inputShape
             self.outShape = (self.filters*self.inputShape[0],self.kernel[0]-self.inputShape[1]+1,self.kernel[1]-self.inputShape[2]+1)
             self.bias = np.random.rand( self.filters,self.kernel[0],self.kernel[1] )
+            self.bias = self.bias/temp
             self.weights = np.random.rand( self.filters,inputShape[0],self.kernel[0],self.kernel[1] )
+            self.weights = self.weights/temp
             self.backPropagationW = np.zeros( (self.filters,inputShape[0],self.kernel[0],self.kernel[1]) )
-            self.backPropagationB = np.zeros( (self.filters,inputShape[0],self.kernel[0],self.kernel[1]) )
+            # self.backPropagationB = np.zeros( (self.filters,self.kernel[0],self.kernel[1]) )
             self.backPropagation = np.zeros(self.inputShape)
     def __call__(self, input:Tensor = None):
         self.inputShape = input.get_layer()
-        print(self.inputShape)
+        # # print(self.inputShape)
         self.inputOK()
         self.outShape = (self.filters,self.inputShape[1]-self.kernel[0]+1,self.inputShape[2]-self.kernel[1]+1)
         self.output = Tensor(*self.outShape)
-        self.output.addLayer(self,temp=input)
+        self.output.addLayer(self,input)
         return self.output
 
     def forward(self,input):
@@ -191,20 +235,20 @@ class Convolution2D(Layer):
         if len(self.input.shape) == 2:
             self.input = self.input.reshape(1,self.input.shape[0],self.input.shape[1])
         # NOTICE: This is a temporary test.
-        # print("weight\n",self.weights.shape)
-        # print("input\n",self.input.shape)
+        # # print("weight\n",self.weights.shape)
+        # # print("input\n",self.input.shape)
         
         self.result = np.zeros(self.outShape)
-        # print("result\n",self.result.shape)
-        # print("self.inputShape:",self.inputShape)
+        # # print("result\n",self.result.shape)
+        # # print("self.inputShape:",self.inputShape)
         for i0 in range(self.inputShape[0]):
             for i1 in range(self.filters):
                 for j in range(self.outShape[1]):
                     for k in range(self.outShape[2]):
                         for l in range(self.kernel[0]):
                             for m in range(self.kernel[1]):
-                                # print("self.result[%d,%d,%d] += self.weights[%d,%d,%d]*self.input[%d,%d,%d] "%(i0*self.filters+i1,j,k,i1,l,m,i1,j+l,k+m))
-                                # print("i0,i1",i0,i1)
+                                # # print("self.result[%d,%d,%d] += self.weights[%d,%d,%d]*self.input[%d,%d,%d] "%(i0*self.filters+i1,j,k,i1,l,m,i1,j+l,k+m))
+                                # # print("i0,i1",i0,i1)
                                 self.result[i1,j,k] += self.weights[i1,i0,l,m]*self.input[i0,j+l,k+m] 
 
         if self.biasUsed:
@@ -215,9 +259,9 @@ class Convolution2D(Layer):
         return self.result
     def feedBackward(self,feedback:np.array):
         self.loss_div_bias = np.matmul(feedback,self.act_div_res)
-        # print("res",self.act_div_res.shape)
-        # print("feed:",feedback.shape)
-        # print("loss_div_bias:",self.loss_div_bias.shape)
+        # # print("res",self.act_div_res.shape)
+        # # print("feed:",feedback.shape)
+        # # print("loss_div_bias:",self.loss_div_bias.shape)
         for i in range(self.outShape[0]):# self.filters
             for i1 in range(self.inputShape[0]):
                 for j in range(self.outShape[1]):
@@ -226,7 +270,7 @@ class Convolution2D(Layer):
                             for m in range(self.kernel[1]):
                                 self.loss_div_weights[i][i1][l][m] += self.loss_div_bias[i,j,k]*self.input[i1,j+l,k+m]
                                 pass
-        self.clipval(self.loss_div_weights)
+        self.loss_div_weights = self.clipval(self.loss_div_weights)
 
         self.backPropagationW = self.backPropagationW + self.loss_div_weights
         # if self.biasUsed:
@@ -242,16 +286,39 @@ class Convolution2D(Layer):
                                     pass#backPropagation 3,4,4 feedback 9,2,2 weights 3,3,3
         return self.backPropagation
     def parameterUpdate(self,sum:int,regularization:Regularization = None):
-        self.weights -= self.learningRate/sum*self.backPropagationW
-        self.bias -= self.learningRate/sum*self.backPropagationB
+        self.now = self.now*self.decay
+        self.weights = self.weights - self.now*self.learningRate/sum*self.backPropagationW
+        # self.bias = self.bias - self.learningRate/sum*self.backPropagationB
         if regularization!= None:
             self.weights = regularization(data = self.weights,num = sum)
-            self.bias = regularization(data = self.bias,num =sum)
-        self.backPropagationW -=self.backPropagationW
-        self.backPropagationB -= self.backPropagationB
+            # self.bias = regularization(data = self.bias,num =sum)
+        self.backPropagationW = np.zeros( (self.filters,self.inputShape[0],self.kernel[0],self.kernel[1]) )
+        # self.backPropagationB = np.zeros( (self.filters,self.kernel[0],self.kernel[1]) )
+        self.backPropagation = np.zeros(self.inputShape)
         pass
+    def logWeights(self):
+        print("Convolution2D:self.weights:",self.weights)
+    def loadWeights(self, filename = None,weights=None,bias=None):
+        if filename is not None:
+            if weights is not None:
+                weights = np.array(weights)
+                assert self.weights.shape == weights.shape
+                self.weights = weights
+            if bias is not None:
+                bias = np.array(bias)
+                assert self.bias.shape == bias.shape
+                self.bias = bias
+        pass
+    def __repr__(self):
+        return self.name
 class MaxPooling2D(Layer):
-    def __init__(self,shape:tuple,input:Tensor = None):
+    order = 0
+    def __init__(self,shape:tuple,input:Tensor = None,name=None):
+        if name is not None:
+            self.name = name
+        else:
+            self.name = "MaxPooling2D"+str(MaxPooling2D.order)
+        MaxPooling2D.order = MaxPooling2D.order + 1
         self.inputShape = input
         self.shape = shape
     def __call__(self, input:Tensor = None):
@@ -259,35 +326,62 @@ class MaxPooling2D(Layer):
         self.outputShape = (self.inputShape[0],ceil(self.inputShape[1]/self.shape[0])\
             ,ceil(self.inputShape[2]/self.shape[1]))
         self.output = Tensor(*self.outputShape)
-        self.output.addLayer(self)
+        self.output.addLayer(self,input)
         return self.output
 
     def forward(self,input):
         input = np.array(input)
-        print(input.shape)
+        # # print(input.shape)
         self.res = np.zeros(self.outputShape)
         self.feedback = np.zeros(input.shape)
+        self.couple =[]
         for i in range(self.outputShape[0]):
             for j in range(self.outputShape[1]):
                 for k in range(self.outputShape[2]):
-                    print(self.shape,self.inputShape)
+                    # # print(self.shape,self.inputShape)
                     temp = input[ i,j*self.shape[0]:min((j+1)*self.shape[0],self.inputShape[1]),k*self.shape[1]:min((k+1)*self.shape[1],self.inputShape[2])]
-                    print(temp)
-                    print("temp.shape",temp.shape)
+                    # # print(temp)
+                    # # print("temp.shape",temp.shape)
                     index = np.unravel_index(temp.argmax(),temp.shape)
-                    print(index)
+                    # # print(index)
                     self.res[i][j][k] = max(temp.flatten() )
                     self.feedback[i][j*self.shape[0]+index[0]][k*self.shape[1]+index[1]] = 1
+                    self.couple.append(( i,j*self.shape[0]+index[0], k*self.shape[1]+index[1]))
                     pass
-        return self.res,self.feedback
+        return self.res
     def feedBackward(self,feedback:np.array):
-       return feedback*self.feedback
+        temp = feedback.flatten()
+        # print("insert288:\n",feedback)
+        # print("insert289:\n",self.feedback)
+        for i in range(len(temp)):
+            i,j,k = self.couple[i]
+            assert(self.feedback[i][j][k]!=0)
+            if self.feedback[i][j][k] !=0:
+                self.feedback[i][j][k] =temp[i]
+        # print("insert295:\n",self.feedback)
 
-    def parameterUpdate(self,sum:int):
+
+        return self.feedback
+
+    def parameterUpdate(self,sum:int,regularization:Regularization = None):
      
         pass
+    def logWeights(self):
+        print("MaxPooling2D:None")
+    def loadWeights(self, filename = None,weights=None,bias=None):
+        if filename is not None:
+            pass
+        pass
+    def __repr__(self):
+        return self.name
 class Flatten(Layer):
-    def __init__(self,inputShape:tuple = None):
+    order = 0
+    def __init__(self,inputShape:tuple = None,name:str =None):
+        if name is not None:
+            self.name = name
+        else:
+            self.name = "Flatten"+str(Flatten.order)
+        Flatten.order = Flatten.order + 1
         self.inputShape = inputShape
         self.inputOK()
     def inputOK(self):
@@ -295,7 +389,7 @@ class Flatten(Layer):
             self.temp = np.array(self.inputShape) 
             x = np.cumprod(self.temp)[-1]
             self.outShape = (x,1)
-            print("x:",x)
+            # print("x:",x)
     def __call__(self,input:Tensor):
         self.inputShape = tuple(input.get_layer())
         self.inputOK()
@@ -303,10 +397,21 @@ class Flatten(Layer):
         self.res.addLayer(self,input)
         return self.res
     def forward(self,input:np.array):
-        self.result = input.flatten()
+        # # print("insert307:", input)
+        self.result = np.array(input)
+        self.result = self.result.flatten()
         self.result = self.result.reshape(self.result.shape[0],1)
         return self.result
     def feedBackward(self,feedback:np.array):
-        return feedback.flatten()
-    def parameterUpdate(self,sum:int):
+        shape = self.inputShape
+        return feedback.reshape(*shape)
+    def parameterUpdate(self,sum:int,regularization:Regularization = None):
         pass
+    def logWeights(self):
+        print("Flatten:None")
+    def loadWeights(self, filename = None,weights=None,bias=None):
+        if filename is not None:
+            pass
+        pass
+    def __repr__(self):
+        return self.name

@@ -1,5 +1,22 @@
 from abc import abstractmethod
 import numpy as np
+def to_categorical(x,classes):
+    size = len(x)
+    zeros = np.zeros(classes)
+    zeros = zeros.tolist()
+    y = []
+    for i in range(size):
+        temp = zeros.copy()
+        temp[x[i]] = 1
+        y.append( temp )
+    y = np.array(y)
+    return y
+def categorical_back(y):
+    res = []
+    for item in y:
+        temp = np.array(item)
+        res.append(temp.argmax())
+    return res
 class Activator(object):
     def __init__(self,):
         pass
@@ -12,9 +29,12 @@ class Activator(object):
 class Logistic(Activator):
     def __init__(self):
         pass
+        def logistic(x):
+            return 1/(np.exp(-x)+1)
+        self.func = np.frompyfunc(logistic,1,1)
     def __call__(self, x):
-        self.x = x
-        self.y = (np.exp(-self.x)+1)**-1
+        self.x = np.array(x)
+        self.y = self.func(x)
         return self.y
     def derivation(self,res,all = True):
         if all:
@@ -38,6 +58,7 @@ class ReLu(Activator):
         return self.func(x)
     def derivation(self,y,all = True):
         if all:
+            y = y.reshape(y.shape[0])
             self.res = np.diag(self.div(y))
         else:
             self.res = self.div(y)
@@ -46,6 +67,9 @@ class Softmax(Activator):
     def __init__(self):
         pass
     def __call__(self,x):
+        x = np.array(x)
+        x = x/100
+        
         self.x = np.array(x).flatten()
         self.temp = []
         for i in self.x:
@@ -56,7 +80,7 @@ class Softmax(Activator):
             self.y.append( i/self.sum)
         self.y = np.array(self.y)
         return self.y
-    def derivation(self,res):
+    def derivation(self,res,all = None):
         self.res = np.zeros((len(self.x), len(self.x)))
         size = len(self.x)
         for i in range(size):
