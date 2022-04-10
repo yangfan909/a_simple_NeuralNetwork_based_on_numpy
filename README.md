@@ -4,6 +4,8 @@
 
 This is a simple neural network based on numpy constructed by myeslf.It maybe very rough.
 __注意：本项目还未完成!__
+项目已转移，详见
+<strong>https://github.com/zhanghanxing2022/nerous-network.git<strong>
 ## 目标
 
 <font size = 20>仿照keras建造一个初步的神经网络架构。它将包括</font><br>
